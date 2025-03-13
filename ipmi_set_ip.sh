@@ -4,15 +4,17 @@ IP="$1"
 STATIC_IP="$2"
 NETMASK="$3"
 GATEWAY="$4"
-USERNAME="ADMIN"
-PASSWORD="admin"
+USERNAME="${5:-ADMIN}"  # Default to ADMIN if not provided
+PASSWORD="${6:-ADMIN}"  # Default to ADMIN if not provided
 
 if [ -z "$IP" ] || [ -z "$STATIC_IP" ] || [ -z "$NETMASK" ] || [ -z "$GATEWAY" ]; then
-    echo "  Usage: $0 <current_ip> <static_ip> <netmask> <gateway>"
+    echo "  Usage: $0 <current_ip> <static_ip> <netmask> <gateway> [username] [password]"
+    echo "  Note: If username/password are not provided, defaults will be used."
     exit 1
 fi
 
 echo "  [*] Configuring IPMI for IP: $IP (New IP: $STATIC_IP)"
+echo "  [*] Using credentials: $USERNAME / [PASSWORD]"
 
 # Set static IP configuration
 timeout 10s ipmitool -I lanplus -H "$IP" -U "$USERNAME" -P "$PASSWORD" lan set 1 ipsrc static

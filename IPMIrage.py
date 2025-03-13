@@ -5,6 +5,7 @@ import os
 import subprocess
 import yaml
 import ipaddress
+import re
 
 # Ensure the script runs inside a virtual environment
 def is_virtual_env():
@@ -52,6 +53,29 @@ LEASES_FILE = config["dhcp"]["leases_file"]
 IPMI_USER = config["ipmi"]["username"]
 IPMI_PASS = config["ipmi"]["password"]
 
+def normalize_mac(mac_address):
+    """
+    Converts various MAC address formats to a standardized format.
+    Removes any separators and ensures lowercase hex format.
+    
+    Example inputs:
+    - aa:bb:cc:dd:ee:ff
+    - AA-BB-CC-DD-EE-FF
+    - aabbccddeeff
+    
+    Output: aa:bb:cc:dd:ee:ff
+    """
+    # Remove all separators and convert to lowercase
+    mac = re.sub(r'[^a-fA-F0-9]', '', mac_address).lower()
+    
+    # Check if we have a valid MAC address (12 hex characters)
+    if len(mac) != 12:
+        print(f"WARNING: Invalid MAC address format: {mac_address}")
+        return mac_address
+    
+    # Format with colons (aa:bb:cc:dd:ee:ff)
+    return ':'.join(mac[i:i+2] for i in range(0, 12, 2))
+
 def setup_eth0_for_dhcp(interface, dhcp_ip):
     """Sets eth0 to a static IP in the DHCP subnet before starting dnsmasq."""
     print(f"[*] Setting {interface} IP to {dhcp_ip} to serve DHCP requests...")
@@ -92,22 +116,33 @@ log-dhcp
 def get_dhcp_ip(mac_addr):
     """Find the DHCP-Assigned IP for a given MAC"""
     try:
+        # Normalize the MAC address format for comparison
+        normalized_mac = normalize_mac(mac_addr)
+        
         with open(LEASES_FILE, "r") as file:
             leases = file.readlines()
 
         for lease in leases:
             parts = lease.split()
-            if mac_addr.lower() == parts[1].lower():
-                return parts[2]  # Assigned IP
+            if len(parts) >= 3:  # Make sure we have enough parts
+                lease_mac = normalize_mac(parts[1])
+                if lease_mac == normalized_mac:
+                    return parts[2]  # Assigned IP
     except Exception as e:
         print(f"ERROR: Reading DHCP leases: {e}")
 
     return None
 
-def configure_ipmi_bash(dhcp_ip, static_ip, netmask, gateway):
+def configure_ipmi_bash(dhcp_ip, static_ip, netmask, gateway, password=None):
     """Calls an external Bash script to configure IPMI."""
     try:
-        subprocess.run(["./ipmi_set_ip.sh", dhcp_ip, static_ip, netmask, gateway], check=True)
+        # Use default password from config if none provided
+        if not password:
+            password = IPMI_PASS
+            
+        # Call the bash script with the password parameter
+        cmd = ["./ipmi_set_ip.sh", dhcp_ip, static_ip, netmask, gateway, IPMI_USER, password]
+        subprocess.run(cmd, check=True)
         print(f"    [*] Successfully configured IPMI: {static_ip}")
     except subprocess.CalledProcessError:
         print(f"    ERROR: Failed to configure IPMI for {static_ip}")
@@ -122,27 +157,41 @@ def main():
 
     with open(CSV_FILE, "r") as file:
         reader = csv.reader(file)
-        next(reader)  # Skip header
-
-        for mac, static_ip, netmask, gateway in reader:
-            print(f"[-] Looking for IP assigned to MAC: {mac}...")
+        headers = next(reader)  # Read header row
+        
+        # Check if we have a password column (5 columns total)
+        has_password_column = len(headers) >= 5
+        
+        for row in reader:
+            # Handle different CSV formats
+            if has_password_column and len(row) >= 5:
+                mac, static_ip, netmask, gateway, password = row[0], row[1], row[2], row[3], row[4]
+            elif len(row) >= 4:
+                mac, static_ip, netmask, gateway = row[0], row[1], row[2], row[3]
+                password = IPMI_PASS  # Use default from config
+            else:
+                print(f"ERROR: Invalid row in CSV: {row}")
+                continue
+                
+            # Normalize the MAC address
+            normalized_mac = normalize_mac(mac)
+            print(f"[-] Looking for IP assigned to MAC: {normalized_mac}...")
 
             dhcp_ip = None
             attempts = 5  # Retry if IP isn't found immediately
 
             while attempts > 0:
-                dhcp_ip = get_dhcp_ip(mac)
+                dhcp_ip = get_dhcp_ip(normalized_mac)
                 if dhcp_ip:
                     break
                 time.sleep(5)
                 attempts -= 1
 
             if dhcp_ip:
-                print(f"[*] Found {dhcp_ip} for {mac}. Assigning static IP {static_ip}...")
-                configure_ipmi_bash(dhcp_ip, static_ip, netmask, gateway)
+                print(f"[*] Found {dhcp_ip} for {normalized_mac}. Assigning static IP {static_ip}...")
+                configure_ipmi_bash(dhcp_ip, static_ip, netmask, gateway, password)
             else:
-                print(f"[X] No DHCP IP found for MAC {mac}. Skipping...")
+                print(f"[X] No DHCP IP found for MAC {normalized_mac}. Skipping...")
 
 if __name__ == "__main__":
     main()
-
