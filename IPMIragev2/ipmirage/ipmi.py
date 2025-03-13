@@ -150,7 +150,12 @@ def configure_ipmi_device(
         # Temporarily change our IP to the gateway IP if needed
         original_ip = None
         if temp_network_changes:
-            logger.info(f"Temporarily adding gateway IP {gateway} to {interface}")
+            # Convert netmask to CIDR prefix
+            import ipaddress
+            network = ipaddress.IPv4Network(f"0.0.0.0/{netmask}", strict=False)
+            prefix_length = network.prefixlen
+            
+            logger.info(f"Temporarily adding gateway IP {gateway} with netmask /{prefix_length} to {interface}")
             
             # Get current IP
             exit_code, stdout, _ = run_command(
@@ -164,9 +169,9 @@ def configure_ipmi_device(
                 if match:
                     original_ip = match.group(1)
             
-            # Add gateway IP temporarily
+            # Add gateway IP temporarily with the correct prefix length
             exit_code, _, stderr = run_command(
-                ["ip", "addr", "add", f"{gateway}/24", "dev", interface],
+                ["ip", "addr", "add", f"{gateway}/{prefix_length}", "dev", interface],
                 check=False
             )
             
@@ -237,10 +242,15 @@ def configure_ipmi_device(
             
         finally:
             # Restore original network config if necessary
-            if temp_network_changes and original_ip != gateway:
-                logger.info(f"Removing temporary gateway IP {gateway} from {interface}")
+            if temp_network_changes:
+                # Convert netmask to CIDR prefix
+                import ipaddress
+                network = ipaddress.IPv4Network(f"0.0.0.0/{netmask}", strict=False)
+                prefix_length = network.prefixlen
+                
+                logger.info(f"Removing temporary gateway IP {gateway}/{prefix_length} from {interface}")
                 run_command(
-                    ["ip", "addr", "del", f"{gateway}/24", "dev", interface],
+                    ["ip", "addr", "del", f"{gateway}/{prefix_length}", "dev", interface],
                     check=False
                 )
     
