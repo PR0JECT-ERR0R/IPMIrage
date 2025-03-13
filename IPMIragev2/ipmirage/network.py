@@ -345,6 +345,10 @@ def create_dhcp_pool(config: Dict[str, Any]) -> None:
 # IPMIrage DHCP Configuration
 # Created: {time.strftime("%Y-%m-%d %H:%M:%S")}
 
+# Disable DNS functionality (only DHCP)
+port=0
+bind-interfaces
+
 interface={interface}
 dhcp-range={dhcp_range_start},{dhcp_range_end},{subnet_mask},12h
 log-dhcp

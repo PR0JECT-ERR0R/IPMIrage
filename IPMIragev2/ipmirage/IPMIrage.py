@@ -19,6 +19,7 @@ from .config import (
     load_and_validate_config,
     load_mac_ip_mappings,
     validate_mappings_with_config,
+    print_mac_ip_mappings_template,
     ConfigurationError,
     CSVFormatError
 )
@@ -76,9 +77,15 @@ def parse_arguments():
     )
     
     parser.add_argument(
+        "--show-template",
+        action="store_true",
+        help="Show a template for the MAC-to-IP CSV file and exit"
+    )
+    
+    parser.add_argument(
         "--script",
-        default="./ipmi_set_ip.sh",
-        help="Path to IPMI configuration script (default: ./ipmi_set_ip.sh)"
+        default="ipmirage/ipmi_set_ip.sh",
+        help="Path to IPMI configuration script (default: ipmirage/ipmi_set_ip.sh)"
     )
     
     parser.add_argument(
@@ -113,6 +120,12 @@ def check_requirements() -> None:
     """
     # Check for root privileges
     if os.geteuid() != 0:
+        # Special case for --show-template which doesn't require root
+        if "--show-template" in sys.argv:
+            # This is fine, we'll handle it in main()
+            return
+            
+        # Otherwise, root is required
         raise RuntimeError("This script must be run as root to configure network and DHCP")
     
     # Check for required tools
@@ -158,6 +171,11 @@ def run_ipmirage(args: Any) -> int:
         # Load MAC-to-IP mappings
         logger.info(f"Loading MAC-to-IP mappings from {args.csv}")
         mappings = load_mac_ip_mappings(args.csv)
+        
+        # Log how many mappings have custom passwords
+        custom_pass_count = sum(1 for m in mappings if "password" in m)
+        logger.info(f"Found {custom_pass_count}/{len(mappings)} devices with custom passwords")
+        
         validated_mappings = validate_mappings_with_config(mappings, config)
         logger.info(f"Loaded {len(validated_mappings)} valid MAC-to-IP mappings")
         
@@ -228,11 +246,22 @@ def run_ipmirage(args: Any) -> int:
         
         logger.info(f"Configuring {len(devices)} IPMI devices")
         
+        # Log password usage summary without exposing actual passwords
+        default_username = config["ipmi"]["username"]
+        default_password = config["ipmi"]["password"]
+        custom_pass_count = sum(1 for d in devices if d.get("password") != default_password)
+        
+        logger.info(f"Using default IPMI username '{default_username}' for all devices")
+        logger.info(f"Using custom passwords for {custom_pass_count}/{len(devices)} devices")
+        if custom_pass_count < len(devices):
+            logger.info(f"Using default password for {len(devices) - custom_pass_count} devices")
+        
         # Configure IPMI devices
         results = configure_ipmi_devices_parallel(
             devices,
             use_script=True,
-            script_path=args.script,
+            # Ensure script path is absolute
+            script_path=os.path.abspath(args.script) if not os.path.isabs(args.script) else args.script,
             max_workers=args.max_workers
         )
         
@@ -280,6 +309,11 @@ def main():
     
     # Parse command line arguments
     args = parse_arguments()
+    
+    # Show template if requested
+    if args.show_template:
+        print_mac_ip_mappings_template()
+        sys.exit(0)
     
     # Run the IPMIrage workflow
     try:

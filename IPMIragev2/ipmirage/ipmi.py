@@ -120,6 +120,8 @@ def configure_ipmi_device(
         if not check_ipmi_connectivity(dhcp_ip, username, password):
             logger.warning(f"Cannot connect to IPMI device at {dhcp_ip}")
             logger.warning("Will attempt to configure anyway")
+        else:
+            logger.info(f"Successfully connected to IPMI device at {dhcp_ip} with provided credentials")
         
         # Set static IP
         logger.info(f"Setting static IP source for {dhcp_ip}")
@@ -287,6 +289,7 @@ def configure_ipmi_with_script(
     logger.info(f"Configuring IPMI device at {dhcp_ip} with static IP {static_ip} using script")
     
     try:
+        logger.debug(f"Using {'custom' if password != 'ADMIN' else 'default'} password for IPMI device at {dhcp_ip}")
         cmd = [
             script_path,
             dhcp_ip,
@@ -361,6 +364,10 @@ def configure_ipmi_devices_parallel(
                     device["password"]
                 )
             
+            logger.debug(
+                f"Configuration task submitted for MAC {mac} (Custom password: {'Yes' if device.get('password') != 'ADMIN' else 'No'})"
+            )
+            
             future_to_mac[future] = mac
         
         # Process results as they complete
@@ -417,9 +424,16 @@ def create_configuration_device_list(
                 "static_ip": mapping["static_ip"],
                 "netmask": mapping["netmask"],
                 "gateway": mapping["gateway"],
-                "username": default_username,
-                "password": mapping.get("password", default_password)
+                "username": default_username
             }
+            
+            # Handle password setting and logging appropriately
+            if "password" in mapping:
+                logger.debug(f"Using custom password from CSV for MAC {mac}")
+                device["password"] = mapping["password"]
+            else:
+                logger.debug(f"Using default password from config for MAC {mac}")
+                device["password"] = default_password
             
             devices.append(device)
     

@@ -221,12 +221,17 @@ def load_mac_ip_mappings(csv_file: str) -> List[Dict[str, str]]:
             headers = [h.strip().upper() for h in headers]
             
             # Validate headers
-            required_headers = ["MAC", "STATIC", "NETMASK", "GATEWAY"]
+            required_headers = ["MAC", "STATIC", "NETMASK", "GATEWAY"] 
+            optional_headers = ["PASSWORD"]
+            
             missing_headers = [h for h in required_headers if h not in headers]
             
             if missing_headers:
                 raise CSVFormatError(
-                    f"Missing required columns in CSV: {', '.join(missing_headers)}\n"
+                    f"Missing required columns in CSV: {', '.join(missing_headers)}\n" 
+                    f"Optional columns: {', '.join(optional_headers)}\n"
+                    f"Note: If PASSWORD column is missing, default IPMI credentials from config will be used.\n"
+                    f"Add PASSWORD column to specify custom passwords per device.\n"
                     f"Found columns: {', '.join(headers)}"
                 )
             
@@ -264,7 +269,10 @@ def load_mac_ip_mappings(csv_file: str) -> List[Dict[str, str]]:
                 
                 # Add password if available
                 if password_idx >= 0 and password_idx < len(row) and row[password_idx]:
+                    logger.debug(f"Custom password found for MAC {row[mac_idx]}")
                     mapping["password"] = row[password_idx]
+                else:
+                    logger.debug(f"No custom password for MAC {row[mac_idx]}, will use default")
                 
                 # Validate values
                 if not mapping["mac"]:
@@ -333,6 +341,12 @@ def validate_mappings_with_config(mappings: List[Dict[str, str]],
                     f"This may cause conflicts."
                 )
             
+            # Check for password presence and log appropriately 
+            if "password" in mapping:
+                logger.debug(f"Using custom password for MAC {mapping['mac']}")
+            else:
+                logger.debug(f"Using default password for MAC {mapping['mac']} from configuration")
+            
             # Add to validated mappings
             validated_mappings.append(mapping)
             
@@ -343,3 +357,28 @@ def validate_mappings_with_config(mappings: List[Dict[str, str]],
         raise ConfigurationError("All MAC-to-IP mappings are invalid")
     
     return validated_mappings
+
+def print_mac_ip_mappings_template():
+    """
+    Print a template for the MAC-to-IP mappings CSV file.
+    This is useful for users to understand the expected format.
+    """
+    template = """
+# MAC-to-IP Mappings CSV Template for IPMIrage
+# 
+# Required columns:
+# - MAC: MAC address of the IPMI interface
+# - STATIC: Static IP address to assign
+# - NETMASK: Subnet mask
+# - GATEWAY: Gateway IP address
+#
+# Optional columns:
+# - PASSWORD: Custom password for IPMI authentication (if omitted, uses default from config.yaml)
+#
+# Example:
+MAC,STATIC,NETMASK,GATEWAY,PASSWORD
+00:11:22:33:44:55,192.168.1.100,255.255.255.0,192.168.1.1,MyCustomPass1
+aa:bb:cc:dd:ee:ff,192.168.1.101,255.255.255.0,192.168.1.1,MyCustomPass2
+"""
+    print(template)
+    return template
